@@ -11,6 +11,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/go-logr/logr"
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
@@ -51,7 +52,10 @@ type Pinger struct {
 	// TargetAddr is the target host address
 	TargetAddr string
 
-	log *log.Logger
+	UDP bool
+
+	log         *log.Logger
+	debugLogger *logr.Logger
 
 	// resolvedTargetAddr ...
 	resolvedTargetAddr *net.IPAddr
@@ -162,7 +166,16 @@ func (p *Pinger) Send(ctx context.Context, c *icmp.PacketConn) error {
 			if err != nil {
 				return err
 			}
-			if _, err := c.WriteTo(wb, p.resolvedTargetAddr); err != nil {
+
+			var addr net.Addr
+			addr = p.resolvedTargetAddr
+			if p.Protocol == ProtocolUDP {
+				addr = &net.UDPAddr{
+					IP: p.resolvedTargetAddr.IP,
+				}
+			}
+
+			if _, err := c.WriteTo(wb, addr); err != nil {
 				if errors.Is(err, os.ErrDeadlineExceeded) {
 					p.log.Printf("Request timeout for icmp_seq %d\n", p.sequence)
 				} else {
@@ -212,13 +225,15 @@ func (p *Pinger) Receive(ctx context.Context, c *icmp.PacketConn) error {
 				continue
 			}
 
+			p.debugLogger.V(4).Info("receive packet", "ip", ip, "bytes", n, "data", buf)
+
 			proto := 1 // icmp v4
 			if p.ipProtocolVersion == 6 {
 				proto = 58 // icmp v6
 			}
 
-			rm, err := icmp.ParseMessage(proto, buf)
-			if err != nil {
+			var rm *icmp.Message
+			if rm, err = icmp.ParseMessage(proto, buf); err != nil {
 				return err
 			}
 			p.processICMPPacket(rm, n, ip, ttl)
@@ -227,26 +242,28 @@ func (p *Pinger) Receive(ctx context.Context, c *icmp.PacketConn) error {
 }
 
 func (p *Pinger) processICMPPacket(rm *icmp.Message, n int, ip net.Addr, ttl int) {
-	switch rm.Type {
-	case ipv4.ICMPTypeEchoReply, ipv6.ICMPTypeEchoReply:
-		echo := rm.Body.(*icmp.Echo)
-		if echo.ID != p.id {
-			return
-		}
-
-		sendTime := bytesToTime(echo.Data[0:8])
-		timeMs := int(time.Now().Sub(sendTime).Milliseconds())
-		if p.maxLatency == 0 || p.maxLatency < timeMs {
-			p.maxLatency = timeMs
-		}
-		if p.minLatency == 0 || p.minLatency > timeMs {
-			p.minLatency = timeMs
-		}
-		p.avgLatency = int(((p.receivePackets * int64(p.avgLatency)) + int64(timeMs)) / (p.receivePackets + 1))
-		p.sumOfSquareLatency += int64(timeMs * timeMs)
-		p.log.Printf("%d bytes from %s: icmp_seq=%d ttl=%d time=%d ms\n", n, ip, echo.Seq, ttl, timeMs)
-		p.receivePackets++
+	if rm.Type != ipv4.ICMPTypeEchoReply && rm.Type != ipv6.ICMPTypeEchoReply {
+		p.debugLogger.V(4).Info("unknown packet type", "type", rm.Type, "message", rm)
+		return
 	}
+
+	echo := rm.Body.(*icmp.Echo)
+	if echo.ID != p.id {
+		return
+	}
+
+	sendTime := bytesToTime(echo.Data[0:8])
+	timeMs := int(time.Now().Sub(sendTime).Milliseconds())
+	if p.maxLatency == 0 || p.maxLatency < timeMs {
+		p.maxLatency = timeMs
+	}
+	if p.minLatency == 0 || p.minLatency > timeMs {
+		p.minLatency = timeMs
+	}
+	p.avgLatency = int(((p.receivePackets * int64(p.avgLatency)) + int64(timeMs)) / (p.receivePackets + 1))
+	p.sumOfSquareLatency += int64(timeMs * timeMs)
+	p.log.Printf("%d bytes from %s: icmp_seq=%d ttl=%d time=%d ms\n", n, ip, echo.Seq, ttl, timeMs)
+	p.receivePackets++
 }
 
 func (p *Pinger) continueToPing() bool {
@@ -290,6 +307,10 @@ func (p *Pinger) printSummary() {
 }
 
 func (p *Pinger) initDefaultOptions() error {
+	if p.UDP {
+		p.Protocol = ProtocolUDP
+	}
+
 	if p.Protocol == "" {
 		// default: icmp
 		p.Protocol = ProtocolICMP
@@ -325,6 +346,10 @@ func (p *Pinger) initDefaultOptions() error {
 
 func (p *Pinger) SetLogger(log *log.Logger) {
 	p.log = log
+}
+
+func (p *Pinger) SetDebugLogger(log logr.Logger) {
+	p.debugLogger = &log
 }
 
 func (p *Pinger) getAddrByInterface() (string, error) {
