@@ -232,7 +232,7 @@ func (p *Pinger) Receive(ctx context.Context, c *icmp.PacketConn) error {
 				continue
 			}
 
-			p.debugLogger.V(4).Info("receive packet", "ip", ip, "bytes", n, "data", buf)
+			p.debugLogger.V(4).Info("receive packet", "ip", ip, "bytes", n, "data", fmt.Sprintf("%x", buf))
 
 			proto := 1 // icmp v4
 			if p.ipProtocolVersion == 6 {
@@ -249,11 +249,33 @@ func (p *Pinger) Receive(ctx context.Context, c *icmp.PacketConn) error {
 }
 
 func (p *Pinger) processICMPPacket(rm *icmp.Message, n int, ip net.Addr, ttl int) {
-	if rm.Type != ipv4.ICMPTypeEchoReply && rm.Type != ipv6.ICMPTypeEchoReply {
-		p.debugLogger.V(4).Info("unknown packet type", "type", rm.Type, "message", rm)
-		return
-	}
+	if p.ipProtocolVersion == 4 {
+		switch rm.Type {
+		case ipv4.ICMPTypeEchoReply:
+			p.processEchoReply(rm, n, ip, ttl)
+		case ipv4.ICMPTypeDestinationUnreachable:
+			p.processDestinationUnreachable(rm, ip)
+		case ipv4.ICMPTypeTimeExceeded:
+			p.processTTLExceeded(rm, ip)
+		default:
+			p.debugLogger.V(4).Info("unknown packet type", "type", rm.Type, "message", rm)
+		}
+	} else {
+		switch rm.Type {
+		case ipv6.ICMPTypeEchoReply:
+			p.processEchoReply(rm, n, ip, ttl)
+		case ipv6.ICMPTypeDestinationUnreachable:
+			p.processDestinationUnreachable(rm, ip)
+		case ipv6.ICMPTypeTimeExceeded:
+			p.processTTLExceeded(rm, ip)
+		default:
+			p.debugLogger.V(4).Info("unknown packet type", "type", rm.Type, "message", rm)
+		}
 
+	}
+}
+
+func (p *Pinger) processEchoReply(rm *icmp.Message, n int, ip net.Addr, ttl int) {
 	echo := rm.Body.(*icmp.Echo)
 	if echo.ID != p.id {
 		return
@@ -273,6 +295,46 @@ func (p *Pinger) processICMPPacket(rm *icmp.Message, n int, ip net.Addr, ttl int
 	p.receivePackets++
 }
 
+func (p *Pinger) processDestinationUnreachable(rm *icmp.Message, ip net.Addr) {
+	msg := rm.Body.(*icmp.DstUnreach)
+	var icmpData []byte
+	if p.ipProtocolVersion == 4 {
+		icmpData = msg.Data[ipv4.HeaderLen:]
+	} else {
+		icmpData = msg.Data[ipv6.HeaderLen:]
+	}
+
+	p.debugLogger.V(4).Info("", "data", fmt.Sprintf("%x", icmpData), "id", fmt.Sprintf("%x", icmpData[4:6]), "seq", icmpData[6:8])
+
+	id := binary.BigEndian.Uint16(icmpData[4:6])
+	seq := binary.BigEndian.Uint16(icmpData[6:8])
+	if int(id) != p.id {
+		return
+	}
+
+	p.log.Printf("From %s icmp_seq=%d Destination unreachable", ip, seq)
+}
+
+func (p *Pinger) processTTLExceeded(rm *icmp.Message, ip net.Addr) {
+	msg := rm.Body.(*icmp.TimeExceeded)
+	var icmpData []byte
+	if p.ipProtocolVersion == 4 {
+		icmpData = msg.Data[ipv4.HeaderLen:]
+	} else {
+		icmpData = msg.Data[ipv6.HeaderLen:]
+	}
+
+	p.debugLogger.V(4).Info("", "data", fmt.Sprintf("%x", icmpData), "id", fmt.Sprintf("%x", icmpData[4:6]), "seq", icmpData[6:8])
+
+	id := binary.BigEndian.Uint16(icmpData[4:6])
+	seq := binary.BigEndian.Uint16(icmpData[6:8])
+	if int(id) != p.id {
+		return
+	}
+
+	p.log.Printf("From %s icmp_seq=%d Time to live exceeded", ip, seq)
+}
+
 func (p *Pinger) continueToPing() bool {
 	if p.Timeout != 0 && !p.firstPacketTimestamp.IsZero() {
 		if p.firstPacketTimestamp.Add(time.Second * time.Duration(p.Timeout)).Before(time.Now()) {
@@ -290,7 +352,7 @@ func (p *Pinger) continueToPing() bool {
 }
 
 func (p *Pinger) setSendMetrics() {
-	if p.sequence == 0 {
+	if p.firstPacketTimestamp.IsZero() {
 		p.firstPacketTimestamp = time.Now()
 	}
 	p.sendPackets++
@@ -314,6 +376,7 @@ func (p *Pinger) printSummary() {
 }
 
 func (p *Pinger) initDefaultOptions() error {
+	p.sequence = 1
 	if p.UDP {
 		p.Protocol = ProtocolUDP
 	}
