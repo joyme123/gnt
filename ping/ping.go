@@ -99,8 +99,15 @@ func (p *Pinger) Run(ctx context.Context) error {
 		if err := c.IPv4PacketConn().SetTTL(p.TTL); err != nil {
 			return err
 		}
+		if err := c.IPv4PacketConn().SetControlMessage(ipv4.FlagTTL, true); err != nil {
+			return err
+		}
 	} else {
 		if err := c.IPv6PacketConn().SetHopLimit(p.TTL); err != nil {
+			return err
+		}
+
+		if err := c.IPv6PacketConn().SetControlMessage(ipv6.FlagHopLimit, true); err != nil {
 			return err
 		}
 	}
