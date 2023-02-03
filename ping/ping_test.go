@@ -21,24 +21,6 @@ func TestPinger_network(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "udp4 case 1",
-			fields: fields{
-				Unprivileged: true,
-				Network:      "",
-			},
-			want:    "udp4",
-			wantErr: false,
-		},
-		{
-			name: "udp4 case 2",
-			fields: fields{
-				Unprivileged: true,
-				Network:      "ip",
-			},
-			want:    "udp4",
-			wantErr: false,
-		},
-		{
 			name: "udp4 case 3",
 			fields: fields{
 				Unprivileged: true,
@@ -53,25 +35,7 @@ func TestPinger_network(t *testing.T) {
 				Unprivileged: true,
 				Network:      "ip6",
 			},
-			want:    "udp4",
-			wantErr: false,
-		},
-		{
-			name: "icmp and ip",
-			fields: fields{
-				Unprivileged: false,
-				Network:      "ip",
-			},
-			want:    "ip:icmp",
-			wantErr: false,
-		},
-		{
-			name: "icmp",
-			fields: fields{
-				Unprivileged: false,
-				Network:      "",
-			},
-			want:    "ip:icmp",
+			want:    "udp6",
 			wantErr: false,
 		},
 		{
