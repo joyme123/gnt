@@ -5,14 +5,11 @@ package cmd
 
 import (
 	"context"
-	"flag"
 	"log"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 
-	"github.com/go-logr/glogr"
 	"github.com/spf13/cobra"
 
 	"github.com/joyme123/gnt/ping"
@@ -31,8 +28,6 @@ Cobra is a CLI library for Go that empowers applications.
 This application is a tool to generate the needed files
 to quickly create a Cobra application.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		initGlog()
-
 		if len(args) == 0 {
 			log.Println("must specify a target address to ping")
 			os.Exit(1)
@@ -40,7 +35,7 @@ to quickly create a Cobra application.`,
 		pinger.TargetAddr = args[0]
 
 		pinger.SetLogger(log.Default())
-		pinger.SetDebugLogger(glogr.New())
+		pinger.SetDebugLogger(DebugLogger)
 
 		ctx, _ := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		if err := pinger.Run(ctx); err != nil {
@@ -48,13 +43,6 @@ to quickly create a Cobra application.`,
 			os.Exit(1)
 		}
 	},
-}
-
-var glogInit = sync.Once{}
-
-func initGlog() {
-	flag.Parse()
-	os.Stderr = os.Stdout
 }
 
 func init() {
@@ -76,8 +64,4 @@ func init() {
 	pingCmd.Flags().IntVarP(&pinger.Deadline, "deadline", "w", 1, "deadline")
 	pingCmd.Flags().BoolVarP(&pinger.UDP, "udp", "u", false, "udp")
 
-	_ = flag.Set("v", "1")
-	_ = flag.Set("logtostderr", "true")
-	pingCmd.Flags().AddGoFlag(flag.Lookup("v"))
-	pingCmd.Flags().AddGoFlag(flag.Lookup("logtostderr"))
 }
