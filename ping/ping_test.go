@@ -4,15 +4,15 @@ import "testing"
 
 func TestPinger_network(t *testing.T) {
 	type fields struct {
-		Protocol  Protocol
-		Count     int
-		Interval  int
-		Interface string
-		Timestamp bool
-		Quite     bool
-		TTL       int
-		Timeout   int
-		Network   string
+		Unprivileged bool
+		Count        int
+		Interval     int
+		Interface    string
+		Timestamp    bool
+		Quite        bool
+		TTL          int
+		Timeout      int
+		Network      string
 	}
 	tests := []struct {
 		name    string
@@ -23,8 +23,8 @@ func TestPinger_network(t *testing.T) {
 		{
 			name: "udp4 case 1",
 			fields: fields{
-				Protocol: "udp",
-				Network:  "",
+				Unprivileged: true,
+				Network:      "",
 			},
 			want:    "udp4",
 			wantErr: false,
@@ -32,8 +32,8 @@ func TestPinger_network(t *testing.T) {
 		{
 			name: "udp4 case 2",
 			fields: fields{
-				Protocol: "udp",
-				Network:  "ip",
+				Unprivileged: true,
+				Network:      "ip",
 			},
 			want:    "udp4",
 			wantErr: false,
@@ -41,8 +41,8 @@ func TestPinger_network(t *testing.T) {
 		{
 			name: "udp4 case 3",
 			fields: fields{
-				Protocol: "udp",
-				Network:  "ip4",
+				Unprivileged: true,
+				Network:      "ip4",
 			},
 			want:    "udp4",
 			wantErr: false,
@@ -50,8 +50,8 @@ func TestPinger_network(t *testing.T) {
 		{
 			name: "udp6",
 			fields: fields{
-				Protocol: "udp",
-				Network:  "ip6",
+				Unprivileged: true,
+				Network:      "ip6",
 			},
 			want:    "udp4",
 			wantErr: false,
@@ -59,8 +59,8 @@ func TestPinger_network(t *testing.T) {
 		{
 			name: "icmp and ip",
 			fields: fields{
-				Protocol: "icmp",
-				Network:  "ip",
+				Unprivileged: false,
+				Network:      "ip",
 			},
 			want:    "ip:icmp",
 			wantErr: false,
@@ -68,8 +68,8 @@ func TestPinger_network(t *testing.T) {
 		{
 			name: "icmp",
 			fields: fields{
-				Protocol: "icmp",
-				Network:  "",
+				Unprivileged: false,
+				Network:      "",
 			},
 			want:    "ip:icmp",
 			wantErr: false,
@@ -77,8 +77,8 @@ func TestPinger_network(t *testing.T) {
 		{
 			name: "icmp v4",
 			fields: fields{
-				Protocol: "icmp",
-				Network:  "ip4",
+				Unprivileged: false,
+				Network:      "ip4",
 			},
 			want:    "ip4:icmp",
 			wantErr: false,
@@ -86,8 +86,8 @@ func TestPinger_network(t *testing.T) {
 		{
 			name: "icmp v6",
 			fields: fields{
-				Protocol: "icmp",
-				Network:  "ip6",
+				Unprivileged: false,
+				Network:      "ip6",
 			},
 			want:    "ip6:ipv6-icmp",
 			wantErr: false,
@@ -96,15 +96,15 @@ func TestPinger_network(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p := &Pinger{
-				Protocol:  tt.fields.Protocol,
-				Count:     tt.fields.Count,
-				Interval:  tt.fields.Interval,
-				Interface: tt.fields.Interface,
-				Timestamp: tt.fields.Timestamp,
-				Quite:     tt.fields.Quite,
-				TTL:       tt.fields.TTL,
-				Timeout:   tt.fields.Timeout,
-				Network:   tt.fields.Network,
+				Unprivileged: tt.fields.Unprivileged,
+				Count:        tt.fields.Count,
+				Interval:     tt.fields.Interval,
+				Interface:    tt.fields.Interface,
+				Timestamp:    tt.fields.Timestamp,
+				Quite:        tt.fields.Quite,
+				TTL:          tt.fields.TTL,
+				Timeout:      tt.fields.Timeout,
+				Network:      tt.fields.Network,
 			}
 			got, err := p.network()
 			if (err != nil) != tt.wantErr {

@@ -18,18 +18,8 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// Protocol is ping protocol
-type Protocol string
-
-const (
-	ProtocolUDP  Protocol = "udp"
-	ProtocolICMP Protocol = "icmp"
-)
-
 // Pinger is an implement of ping command
 type Pinger struct {
-	// Protocol: udp(unprivileged), icmp(privileged)
-	Protocol Protocol
 	// Count is times to send icmp/udp packets
 	Count int
 	// Interval is the interval to send packets
@@ -52,7 +42,7 @@ type Pinger struct {
 	// TargetAddr is the target host address
 	TargetAddr string
 
-	UDP bool
+	Unprivileged bool
 
 	log         *log.Logger
 	debugLogger *logr.Logger
@@ -95,21 +85,8 @@ func (p *Pinger) Run(ctx context.Context) error {
 		return err
 	}
 
-	if p.ipProtocolVersion == 4 {
-		if err := c.IPv4PacketConn().SetTTL(p.TTL); err != nil {
-			return err
-		}
-		if err := c.IPv4PacketConn().SetControlMessage(ipv4.FlagTTL, true); err != nil {
-			return err
-		}
-	} else {
-		if err := c.IPv6PacketConn().SetHopLimit(p.TTL); err != nil {
-			return err
-		}
-
-		if err := c.IPv6PacketConn().SetControlMessage(ipv6.FlagHopLimit, true); err != nil {
-			return err
-		}
+	if err := p.setTTL(c); err != nil {
+		return err
 	}
 
 	var cancel context.CancelFunc
@@ -176,7 +153,7 @@ func (p *Pinger) Send(ctx context.Context, c *icmp.PacketConn) error {
 
 			var addr net.Addr
 			addr = p.resolvedTargetAddr
-			if p.Protocol == ProtocolUDP {
+			if p.Unprivileged {
 				addr = &net.UDPAddr{
 					IP: p.resolvedTargetAddr.IP,
 				}
@@ -240,7 +217,7 @@ func (p *Pinger) Receive(ctx context.Context, c *icmp.PacketConn) error {
 			}
 
 			var rm *icmp.Message
-			if rm, err = icmp.ParseMessage(proto, buf); err != nil {
+			if rm, err = p.parseMessage(proto, buf); err != nil {
 				return err
 			}
 			p.processICMPPacket(rm, n, ip, ttl)
@@ -249,6 +226,8 @@ func (p *Pinger) Receive(ctx context.Context, c *icmp.PacketConn) error {
 }
 
 func (p *Pinger) processICMPPacket(rm *icmp.Message, n int, ip net.Addr, ttl int) {
+	// icmp: type(8), code(8), checksum(16), rest of header(32)
+	p.debugLogger.V(4).Info("process icmp packet", "type", rm.Type)
 	if p.ipProtocolVersion == 4 {
 		switch rm.Type {
 		case ipv4.ICMPTypeEchoReply:
@@ -277,7 +256,8 @@ func (p *Pinger) processICMPPacket(rm *icmp.Message, n int, ip net.Addr, ttl int
 
 func (p *Pinger) processEchoReply(rm *icmp.Message, n int, ip net.Addr, ttl int) {
 	echo := rm.Body.(*icmp.Echo)
-	if echo.ID != p.id {
+	p.debugLogger.V(4).Info("process echo reply", "ping id", p.id, "reply id", echo.ID)
+	if !p.matchID(p.id, echo.ID) {
 		return
 	}
 
@@ -308,7 +288,7 @@ func (p *Pinger) processDestinationUnreachable(rm *icmp.Message, ip net.Addr) {
 
 	id := binary.BigEndian.Uint16(icmpData[4:6])
 	seq := binary.BigEndian.Uint16(icmpData[6:8])
-	if int(id) != p.id {
+	if !p.matchID(p.id, int(id)) {
 		return
 	}
 
@@ -328,7 +308,7 @@ func (p *Pinger) processTTLExceeded(rm *icmp.Message, ip net.Addr) {
 
 	id := binary.BigEndian.Uint16(icmpData[4:6])
 	seq := binary.BigEndian.Uint16(icmpData[6:8])
-	if int(id) != p.id {
+	if !p.matchID(p.id, int(id)) {
 		return
 	}
 
@@ -377,14 +357,6 @@ func (p *Pinger) printSummary() {
 
 func (p *Pinger) initDefaultOptions() error {
 	p.sequence = 1
-	if p.UDP {
-		p.Protocol = ProtocolUDP
-	}
-
-	if p.Protocol == "" {
-		// default: icmp
-		p.Protocol = ProtocolICMP
-	}
 
 	if err := p.resolveTargetAddr(); err != nil {
 		return err
@@ -495,20 +467,18 @@ func (p *Pinger) network() (string, error) {
 
 	network := ""
 
-	if p.Protocol == ProtocolUDP {
+	if p.Unprivileged {
 		if p.Network == "ip4" {
 			network = "udp4"
 		} else {
 			network = "udp6"
 		}
-	} else if p.Protocol == ProtocolICMP {
+	} else {
 		if p.Network == "ip4" {
 			network = "ip4:icmp"
 		} else {
 			network = "ip6:ipv6-icmp"
 		}
-	} else {
-		return "", fmt.Errorf("unsupported protocol: %s", p.Protocol)
 	}
 
 	return network, nil

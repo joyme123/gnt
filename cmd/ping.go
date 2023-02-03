@@ -62,6 +62,6 @@ func init() {
 	pingCmd.Flags().IntVarP(&pinger.TTL, "ttl", "t", 64, "ttl")
 	pingCmd.Flags().IntVarP(&pinger.Timeout, "timeout", "W", 0, "timeout")
 	pingCmd.Flags().IntVarP(&pinger.Deadline, "deadline", "w", 1, "deadline")
-	pingCmd.Flags().BoolVarP(&pinger.UDP, "udp", "u", false, "udp")
+	pingCmd.Flags().BoolVarP(&pinger.Unprivileged, "unprivileged", "u", false, "send unprivileged icmp")
 
 }
