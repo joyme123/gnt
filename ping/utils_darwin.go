@@ -10,14 +10,6 @@ import (
 )
 
 func (p *Pinger) parseMessage(proto int, buf []byte) (*icmp.Message, error) {
-	if p.Unprivileged {
-		if p.ipProtocolVersion == 4 {
-			buf = buf[ipv4.HeaderLen:]
-		} else {
-			buf = buf[ipv6.HeaderLen:]
-		}
-	}
-
 	return icmp.ParseMessage(proto, buf)
 }
 
