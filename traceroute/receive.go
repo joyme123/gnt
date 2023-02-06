@@ -100,13 +100,10 @@ func (r *TraceRouter) processReceivePacket(data []byte, ip net.Addr) {
 		return
 	}
 
-	r.updateStatistic(uint8(receivedDstIdentity)+1, utils.IPAddrString(ip))
+	r.updateStatistic((uint8(receivedDstIdentity))/3+1, receivedDstIdentity%3, utils.IPAddrString(ip))
 }
 
-func (r *TraceRouter) updateStatistic(ttl uint8, ip string) {
-	if r.statistics == nil {
-		r.statistics = make(map[uint8][]string)
-	}
+func (r *TraceRouter) updateStatistic(ttl uint8, index int, ip string) {
 
 	// check timeout probe packets
 	if ip == "" {
@@ -116,15 +113,27 @@ func (r *TraceRouter) updateStatistic(ttl uint8, ip string) {
 				for i, timestamp := range timestamps {
 					if timestamp.Add(5 * time.Second).Before(time.Now()) {
 						// timeout
-						if i >= len(addrs) {
-							r.statistics[t] = append(r.statistics[t], "*")
+						if r.statistics[t] == nil {
+							r.statistics[t] = make(map[int]*PacketInfo)
+						}
+						if r.statistics[t][i] == nil {
+							r.statistics[t][i] = &PacketInfo{
+								IP:  "*",
+								RTT: 0,
+							}
 						}
 					}
 				}
 			}
 		}
 	} else {
-		r.statistics[ttl] = append(r.statistics[ttl], ip)
+		if r.statistics[ttl] == nil {
+			r.statistics[ttl] = make(map[int]*PacketInfo)
+		}
+		r.statistics[ttl][index] = &PacketInfo{
+			IP:  ip,
+			RTT: int(time.Now().Sub(r.sendPacketsTimestamps[ttl][index]).Milliseconds()),
+		}
 	}
 	r.printStatistic()
 }
@@ -135,12 +144,16 @@ func (r *TraceRouter) printStatistic() {
 		return
 	}
 
-	if len(addrs) > 0 {
+	if addrs[r.printAddr] != nil {
 		if r.printAddr == 0 {
-			fmt.Printf("%d ", r.printTTL)
+			fmt.Printf("%d  ", r.printTTL)
 		}
-		for i := r.printAddr; i < len(addrs); i++ {
-			fmt.Printf("%s ", addrs[i])
+		for i := r.printAddr; addrs[i] != nil; i++ {
+			if addrs[i].IP == "*" {
+				fmt.Printf("%s  ", addrs[i].IP)
+			} else {
+				fmt.Printf("%s %dms ", addrs[i].IP, addrs[i].RTT)
+			}
 			r.printAddr++
 		}
 		if len(addrs) == 3 {

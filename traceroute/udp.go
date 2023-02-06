@@ -20,7 +20,7 @@ func NewUDPConn(ipv4, ipv6 bool) *UDPConn {
 	return u
 }
 
-func (r *UDPConn) SendProbe(ctx context.Context, addr *net.IPAddr, srcPort, dstPort int, ttl uint8, data []byte, times int) error {
+func (r *UDPConn) SendProbe(ctx context.Context, addr *net.IPAddr, srcPort, dstPort int, ttl uint8, data []byte) error {
 	udpConn, err := net.DialUDP(r.udpNetwork(), &net.UDPAddr{
 		Port: srcPort,
 	}, &net.UDPAddr{
@@ -42,11 +42,9 @@ func (r *UDPConn) SendProbe(ctx context.Context, addr *net.IPAddr, srcPort, dstP
 		return err
 	}
 
-	for i := 0; i < times; i++ {
-		_, err = udpConn.Write(data)
-		if err != nil {
-			return err
-		}
+	_, err = udpConn.Write(data)
+	if err != nil {
+		return err
 	}
 
 	return nil

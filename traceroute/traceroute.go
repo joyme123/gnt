@@ -11,7 +11,12 @@ import (
 )
 
 type Conn interface {
-	SendProbe(ctx context.Context, addr *net.IPAddr, srcPort, dstPort int, ttl uint8, data []byte, times int) error
+	SendProbe(ctx context.Context, addr *net.IPAddr, srcPort, dstPort int, ttl uint8, data []byte) error
+}
+
+type PacketInfo struct {
+	IP  string
+	RTT int
 }
 
 type TraceRouter struct {
@@ -50,7 +55,7 @@ type TraceRouter struct {
 	startPort int
 
 	sendPacketsTimestamps map[uint8][]time.Time
-	statistics            map[uint8][]string
+	statistics            map[uint8]map[int]*PacketInfo
 
 	printTTL  uint8
 	printAddr int
@@ -62,6 +67,7 @@ func NewTraceRouter(opt Options, dst string) *TraceRouter {
 	r := &TraceRouter{
 		DstAddr:               dst,
 		sendPacketsTimestamps: make(map[uint8][]time.Time),
+		statistics:            make(map[uint8]map[int]*PacketInfo),
 	}
 	r.initDefaultOpts(opt)
 	return r
@@ -157,7 +163,7 @@ func (r *TraceRouter) Send(ctx context.Context) error {
 			}
 
 			if !r.continueToRun() {
-				r.updateStatistic(r.ttl, "")
+				r.updateStatistic(r.ttl, 0, "")
 				time.Sleep(50 * time.Millisecond)
 				continue
 			}
@@ -176,7 +182,7 @@ func (r *TraceRouter) continueToRun() bool {
 
 func (r *TraceRouter) complete() bool {
 	if len(r.statistics) == int(r.ttl-1) && len(r.statistics[r.ttl-1]) >= 3 {
-		if r.statistics[r.ttl-1][0] == r.DstAddr {
+		if r.statistics[r.ttl-1][0].IP == r.DstAddr {
 			return true
 		}
 	}
@@ -184,16 +190,19 @@ func (r *TraceRouter) complete() bool {
 }
 
 func (r *TraceRouter) sendProbe(ctx context.Context, addr *net.IPAddr) (bool, error) {
-	if err := r.conn.SendProbe(ctx, addr, r.id(), r.Port, r.ttl, []byte{0x00}, 3); err != nil {
-		return false, err
+	for i := 0; i < 3; i++ {
+		if err := r.conn.SendProbe(ctx, addr, r.id(), r.Port, r.ttl, []byte{0x00}); err != nil {
+			return false, err
+		}
+		r.sendPacketsTimestamps[r.ttl] = append(r.sendPacketsTimestamps[r.ttl], time.Now())
+		r.Port++
 	}
-	r.sendPacketsTimestamps[r.ttl] = append(r.sendPacketsTimestamps[r.ttl], time.Now(), time.Now(), time.Now())
-	r.updateStatistic(r.ttl, "")
+
+	r.updateStatistic(r.ttl, 0, "")
 	r.ttl++
 	if r.ttl > r.MaxTTL {
 		return false, nil
 	}
-	r.Port++
 	return true, nil
 }
 
