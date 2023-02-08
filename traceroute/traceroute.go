@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"os"
+	"runtime"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -63,11 +64,12 @@ type TraceRouter struct {
 	debugLogger logr.Logger
 }
 
-func NewTraceRouter(opt Options, dst string) *TraceRouter {
+func NewTraceRouter(opt Options, dst string, debugLogger logr.Logger) *TraceRouter {
 	r := &TraceRouter{
 		DstAddr:               dst,
 		sendPacketsTimestamps: make(map[uint8][]time.Time),
 		statistics:            make(map[uint8]map[int]*PacketInfo),
+		debugLogger:           debugLogger,
 	}
 	r.initDefaultOpts(opt)
 	return r
@@ -105,6 +107,12 @@ func (r *TraceRouter) initDefaultOpts(opt Options) {
 		r.method = "udp"
 	} else if opt.TCP {
 		r.method = "tcp"
+		if runtime.GOOS == "linux" {
+			r.debugLogger.V(4).Info("use tcp half open connection")
+			r.conn = NewTCPHalfOpenConn(r.IPv4, r.IPv6)
+		} else {
+			r.conn = NewTCPConn(r.IPv4, r.IPv6)
+		}
 	} else {
 		r.conn = NewUDPConn(r.IPv4, r.IPv6)
 		r.method = "default"
@@ -113,10 +121,6 @@ func (r *TraceRouter) initDefaultOpts(opt Options) {
 	r.ttl = r.FirstTTL
 	r.printTTL = r.FirstTTL
 	r.printAddr = 0
-}
-
-func (r *TraceRouter) SetDebugLogger(log logr.Logger) {
-	r.debugLogger = log
 }
 
 func (r *TraceRouter) Run(ctx context.Context) error {
@@ -138,7 +142,10 @@ func (r *TraceRouter) Run(ctx context.Context) error {
 		return r.Send(ctx)
 	})
 
-	return g.Wait()
+	err := g.Wait()
+
+	r.printStatistic()
+	return err
 }
 
 func (r *TraceRouter) Send(ctx context.Context) error {
@@ -181,9 +188,11 @@ func (r *TraceRouter) continueToRun() bool {
 }
 
 func (r *TraceRouter) complete() bool {
-	if len(r.statistics) == int(r.ttl-1) && len(r.statistics[r.ttl-1]) >= 3 {
-		if r.statistics[r.ttl-1][0].IP == r.DstAddr {
-			return true
+	if len(r.statistics) == int(r.ttl-1) {
+		for i := range r.statistics[r.ttl-1] {
+			if r.statistics[r.ttl-1][i].IP == r.DstAddr {
+				return true
+			}
 		}
 	}
 	return false
@@ -191,11 +200,13 @@ func (r *TraceRouter) complete() bool {
 
 func (r *TraceRouter) sendProbe(ctx context.Context, addr *net.IPAddr) (bool, error) {
 	for i := 0; i < 3; i++ {
-		if err := r.conn.SendProbe(ctx, addr, r.id(), r.Port, r.ttl, []byte{0x00}); err != nil {
+		r.sendPacketsTimestamps[r.ttl] = append(r.sendPacketsTimestamps[r.ttl], time.Now())
+		if err := r.conn.SendProbe(ctx, addr, r.id(), r.Port, r.ttl, []byte{0x00, uint8(i)}); err != nil {
 			return false, err
 		}
-		r.sendPacketsTimestamps[r.ttl] = append(r.sendPacketsTimestamps[r.ttl], time.Now())
 		r.Port++
+		// send too fast will cause icmp drop
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	r.updateStatistic(r.ttl, 0, "")

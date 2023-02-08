@@ -42,6 +42,7 @@ type Pinger struct {
 	// TargetAddr is the target host address
 	TargetAddr string
 
+	// FIXME(jpf): can't receive ttl exceeded response on linux
 	Unprivileged bool
 
 	log         *log.Logger
@@ -111,6 +112,7 @@ func (p *Pinger) Listen(ctx context.Context) (*icmp.PacketConn, error) {
 		return nil, err
 	}
 
+	p.debugLogger.V(4).Info("listen", "nerwork", network, "addr", listenAddr)
 	c, err := icmp.ListenPacket(network, listenAddr)
 	if err != nil {
 		return nil, err
@@ -190,6 +192,7 @@ func (p *Pinger) Receive(ctx context.Context, c *icmp.PacketConn) error {
 		case <-ctx.Done():
 			return nil
 		default:
+			p.debugLogger.V(4).Info("start read packets from connection")
 			if p.Deadline > 0 {
 				if err := c.SetReadDeadline(time.Now().Add(time.Second * time.Duration(p.Deadline))); err != nil {
 					return err
@@ -215,6 +218,8 @@ func (p *Pinger) Receive(ctx context.Context, c *icmp.PacketConn) error {
 			}
 			if err != nil {
 				if errors.Is(err, os.ErrDeadlineExceeded) {
+					p.debugLogger.V(4).Info("read packets deadline exceeded", "msg", err.Error(), "n", n)
+					time.Sleep(30 * time.Millisecond)
 					continue
 				} else {
 					p.log.Printf("read failed: %v\n", err)

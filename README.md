@@ -12,5 +12,5 @@ network tools written in go
 ## ping
 
 ## traceroute
-ref doc: https://linux.die.net/man/8/traceroute
-source code: https://github.com/openbsd/src/blob/master/usr.sbin/traceroute/traceroute.c
+- ref doc: https://linux.die.net/man/8/traceroute
+- source code: https://github.com/openbsd/src/blob/master/usr.sbin/traceroute/traceroute.c

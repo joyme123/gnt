@@ -32,8 +32,7 @@ to quickly create a Cobra application.`,
 		}
 
 		ctx, _ := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-		trace := traceroute.NewTraceRouter(opt, args[0])
-		trace.SetDebugLogger(DebugLogger)
+		trace := traceroute.NewTraceRouter(opt, args[0], DebugLogger)
 		if err := trace.Run(ctx); err != nil {
 			log.Println(err.Error())
 			os.Exit(1)

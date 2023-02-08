@@ -1,6 +1,6 @@
 .PHONY: build container run
 build:
-	go build -o gnt main.go
+	CGO_ENABLED=0 go build -a -ldflags '-s -w -extldflags "-static"' -o gnt main.go
 
 build-windows:
 	CGO_ENABLED=0 GOOS=windows go build -o gnt.exe main.go

@@ -25,7 +25,7 @@ func (r *TraceRouter) Receive(ctx context.Context, ch chan<- struct{}) error {
 
 	pinger := ping.Pinger{
 		Network:                         network,
-		Deadline:                        5,
+		Deadline:                        1,
 		TargetAddr:                      r.DstAddr,
 		Unprivileged:                    r.Unprivileged,
 		OnReceiveEchoReply:              r.onReceiveEchoReply,
@@ -39,6 +39,7 @@ func (r *TraceRouter) Receive(ctx context.Context, ch chan<- struct{}) error {
 	}
 
 	ch <- struct{}{}
+	r.debugLogger.V(4).Info("start receive packets")
 	return pinger.Receive(ctx, c)
 }
 
