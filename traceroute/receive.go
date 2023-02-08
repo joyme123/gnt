@@ -44,7 +44,11 @@ func (r *TraceRouter) Receive(ctx context.Context, ch chan<- struct{}) error {
 }
 
 func (r *TraceRouter) onReceiveEchoReply(rm *icmp.Message, n int, ip net.Addr, ttl int) {
-
+	msg, err := rm.Body.(*icmp.Echo).Marshal(0)
+	if err != nil {
+		return
+	}
+	r.processReceivePacket(msg, ip)
 }
 
 func (r *TraceRouter) onReceiveTTLExceeded(rm *icmp.Message, ip net.Addr) {
@@ -62,7 +66,7 @@ func (r *TraceRouter) processReceivePacket(data []byte, ip net.Addr) {
 	var receivedDstIP net.IP
 	// udp: src port, tcp: src port, icmp: id
 	var receivedSrcIdentity int
-	// udp/tcp: dst_port-start_dst_port, icmp: ttl
+	// udp/tcp: dst_port-start_dst_port, icmp: seq
 	var receivedDstIdentity int
 	var layer4Data []byte
 	var receivedProtocol int
@@ -76,7 +80,7 @@ func (r *TraceRouter) processReceivePacket(data []byte, ip net.Addr) {
 		receivedProtocol = hdr.Protocol
 		layer4Data = data[ipv4.HeaderLen:]
 	} else {
-		hdr, err := ipv6.ParseHeader(data[0:ipv4.HeaderLen])
+		hdr, err := ipv6.ParseHeader(data[0:ipv6.HeaderLen])
 		if err != nil {
 			return
 		}
@@ -93,8 +97,7 @@ func (r *TraceRouter) processReceivePacket(data []byte, ip net.Addr) {
 		receivedDstIdentity = int(binary.BigEndian.Uint16(layer4Data[2:4])) - r.startPort
 	} else if receivedProtocol == 1 && r.method == "icmp" {
 		receivedSrcIdentity = int(binary.BigEndian.Uint16(layer4Data[4:6]))
-		// TODO(jpf): 修复
-		receivedDstIdentity = int(binary.BigEndian.Uint16(layer4Data[4:6]))
+		receivedDstIdentity = int(binary.BigEndian.Uint16(layer4Data[6:8]))
 	}
 
 	if receivedSrcIdentity != r.id() || receivedDstIP.String() != r.DstAddr {
