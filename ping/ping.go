@@ -42,6 +42,7 @@ type Pinger struct {
 	// TargetAddr is the target host address
 	TargetAddr string
 
+	// FIXME(jpf): can't receive ttl exceeded response on linux
 	Unprivileged bool
 
 	log         *log.Logger
@@ -63,24 +64,14 @@ type Pinger struct {
 	avgLatency           int
 	sumOfSquareLatency   int64
 	firstPacketTimestamp time.Time
+
+	OnReceiveEchoReply              func(rm *icmp.Message, n int, ip net.Addr, ttl int)
+	OnReceiveTTLExceeded            func(rm *icmp.Message, ip net.Addr)
+	OnReceiveDestinationUnreachable func(rm *icmp.Message, ip net.Addr)
 }
 
 func (p *Pinger) Run(ctx context.Context) error {
-	if err := p.initDefaultOptions(); err != nil {
-		return err
-	}
-
-	network, err := p.network()
-	if err != nil {
-		return err
-	}
-
-	listenAddr, err := p.getAddrByInterface()
-	if err != nil {
-		return err
-	}
-
-	c, err := icmp.ListenPacket(network, listenAddr)
+	c, err := p.Listen(ctx)
 	if err != nil {
 		return err
 	}
@@ -104,6 +95,30 @@ func (p *Pinger) Run(ctx context.Context) error {
 	err = g.Wait()
 	p.printSummary()
 	return err
+}
+
+func (p *Pinger) Listen(ctx context.Context) (*icmp.PacketConn, error) {
+	if err := p.initDefaultOptions(); err != nil {
+		return nil, err
+	}
+
+	network, err := p.network()
+	if err != nil {
+		return nil, err
+	}
+
+	listenAddr, err := p.getAddrByInterface()
+	if err != nil {
+		return nil, err
+	}
+
+	p.debugLogger.V(4).Info("listen", "nerwork", network, "addr", listenAddr)
+	c, err := icmp.ListenPacket(network, listenAddr)
+	if err != nil {
+		return nil, err
+	}
+
+	return c, nil
 }
 
 func (p *Pinger) Send(ctx context.Context, c *icmp.PacketConn) error {
@@ -177,6 +192,7 @@ func (p *Pinger) Receive(ctx context.Context, c *icmp.PacketConn) error {
 		case <-ctx.Done():
 			return nil
 		default:
+			p.debugLogger.V(4).Info("start read packets from connection")
 			if p.Deadline > 0 {
 				if err := c.SetReadDeadline(time.Now().Add(time.Second * time.Duration(p.Deadline))); err != nil {
 					return err
@@ -202,6 +218,8 @@ func (p *Pinger) Receive(ctx context.Context, c *icmp.PacketConn) error {
 			}
 			if err != nil {
 				if errors.Is(err, os.ErrDeadlineExceeded) {
+					p.debugLogger.V(4).Info("read packets deadline exceeded", "msg", err.Error(), "n", n)
+					time.Sleep(30 * time.Millisecond)
 					continue
 				} else {
 					p.log.Printf("read failed: %v\n", err)
@@ -231,22 +249,22 @@ func (p *Pinger) processICMPPacket(rm *icmp.Message, n int, ip net.Addr, ttl int
 	if p.ipProtocolVersion == 4 {
 		switch rm.Type {
 		case ipv4.ICMPTypeEchoReply:
-			p.processEchoReply(rm, n, ip, ttl)
+			p.OnReceiveEchoReply(rm, n, ip, ttl)
 		case ipv4.ICMPTypeDestinationUnreachable:
-			p.processDestinationUnreachable(rm, ip)
+			p.OnReceiveDestinationUnreachable(rm, ip)
 		case ipv4.ICMPTypeTimeExceeded:
-			p.processTTLExceeded(rm, ip)
+			p.OnReceiveTTLExceeded(rm, ip)
 		default:
 			p.debugLogger.V(4).Info("unknown packet type", "type", rm.Type, "message", rm)
 		}
 	} else {
 		switch rm.Type {
 		case ipv6.ICMPTypeEchoReply:
-			p.processEchoReply(rm, n, ip, ttl)
+			p.OnReceiveEchoReply(rm, n, ip, ttl)
 		case ipv6.ICMPTypeDestinationUnreachable:
-			p.processDestinationUnreachable(rm, ip)
+			p.OnReceiveDestinationUnreachable(rm, ip)
 		case ipv6.ICMPTypeTimeExceeded:
-			p.processTTLExceeded(rm, ip)
+			p.OnReceiveTTLExceeded(rm, ip)
 		default:
 			p.debugLogger.V(4).Info("unknown packet type", "type", rm.Type, "message", rm)
 		}
@@ -368,7 +386,7 @@ func (p *Pinger) initDefaultOptions() error {
 		p.ipProtocolVersion = 6
 	}
 
-	if p.Network == "" {
+	if p.Network == "" || p.Network == "ip" {
 		if p.ipProtocolVersion == 4 {
 			p.Network = "ip4"
 		} else {
@@ -382,6 +400,16 @@ func (p *Pinger) initDefaultOptions() error {
 		p.log = log.Default()
 	}
 	p.log.SetFlags(0)
+
+	if p.OnReceiveEchoReply == nil {
+		p.OnReceiveEchoReply = p.processEchoReply
+	}
+	if p.OnReceiveTTLExceeded == nil {
+		p.OnReceiveTTLExceeded = p.processTTLExceeded
+	}
+	if p.OnReceiveDestinationUnreachable == nil {
+		p.OnReceiveDestinationUnreachable = p.processDestinationUnreachable
+	}
 
 	return nil
 }
