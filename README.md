@@ -2,8 +2,9 @@
 network tools written in go
 
 - [x] ping
-- [ ] traceroute
-- [ ] tcpdump
+- [x] traceroute
+- [x] tcpdump
+- [ ] ip
 - [ ] curl
 - [ ] telnet
 - [ ] nc
